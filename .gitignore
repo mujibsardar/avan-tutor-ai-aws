@@ -4,3 +4,7 @@ node_modules
 .cdk.staging
 cdk.out/
 .env
+
+# PDF credentials
+pdfservices-api-credentials.json
+

@@ -1,18 +1,33 @@
+// **************************************** NOT UTILIZED ****************************************
+// Lambda function to extract text from PDF and DOCX files using Adobe PDF Services SDK and Mammoth
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-} from "@aws-sdk/client-s3";
-import { createRequire } from "module";
-import { Readable } from "stream";
-const require = createRequire(import.meta.url);
+  SecretsManagerClient,
+  GetSecretValueCommand,
+} from "@aws-sdk/client-secrets-manager";
+import parser from "lambda-multipart-parser";
+import fs from "fs/promises";
+import path from "path";
+import { createReadStream, createWriteStream } from "fs";
 
-const pdfParse = require("pdf-parse");
+// Adobe PDF Services SDK
+import {
+  ServicePrincipalCredentials,
+  PDFServices,
+  MimeType,
+  ExtractPDFParams,
+  ExtractElementType,
+  ExtractPDFJob,
+  ExtractPDFResult,
+} from "@adobe/pdfservices-node-sdk";
+
+// Mammoth for DOCX extraction
 import mammoth from "mammoth";
-import multipart from "aws-lambda-multipart-parser";
 
+// Initialize S3 client
 const s3Client = new S3Client({ region: "us-west-2" });
 
+// Lambda function handler
 export const handler = async (event) => {
   try {
     if (event.httpMethod === "OPTIONS") {
@@ -37,51 +52,63 @@ export const handler = async (event) => {
       };
     }
 
-    // Parse the multipart form data
-    const parsedBody = multipart.parse(event, true);
-    const fileData = parsedBody.file;
-    if (!fileData) {
-      throw new Error("No file uploaded.");
+    const parsed = await parser.parse(event);
+    const file = parsed.files?.[0];
+    if (!file) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ message: "No file uploaded." }),
+      };
     }
 
-    const { contentType, filename, content } = fileData;
-
-    // Upload file to S3
-    const bucketName =
-      "cdkaitutoringstackstoragestac-uploadbucketd2c1da78-ck0p7bxkt4ti";
     await s3Client.send(
       new PutObjectCommand({
-        Bucket: bucketName,
-        Key: filename,
-        Body: content,
+        Bucket:
+          "cdkaitutoringstackstoragestac-uploadbucketd2c1da78-ck0p7bxkt4ti",
+        Key: `uploads/${file.filename}`,
+        Body: file.content,
+        ContentType: file.contentType,
       })
     );
 
-    // Fetch file from S3
-    const s3Response = await s3Client.send(
-      new GetObjectCommand({
-        Bucket: bucketName,
-        Key: filename,
+    const secretsManagerClient = new SecretsManagerClient({
+      region: "us-west-2",
+    });
+    const secretResponse = await secretsManagerClient.send(
+      new GetSecretValueCommand({
+        SecretId: "AdobePdfServicesSecret", // Replace with your secret name
       })
     );
+    const secretString = JSON.parse(secretResponse.SecretString);
 
-    const fileStream = s3Response.Body;
+    if (!secretString.clientId || !secretString.client_secret) {
+      throw new Error(
+        "Missing clientId or client_secret in Adobe PDF Services Secret."
+      );
+    }
 
-    // Convert the file stream to a buffer
-    const fileBuffer = await streamToBuffer(fileStream);
+    const credentials = new ServicePrincipalCredentials({
+      clientId: secretString.clientId,
+      clientSecret: secretString.client_secret,
+    });
 
-    // Extract text based on file type
+    const pdfServices = new PDFServices({ credentials });
+
     let extractedText = "";
-    if (contentType === "application/pdf") {
-      extractedText = await extractTextFromPDF(fileBuffer);
+    if (file.contentType === "application/pdf") {
+      extractedText = await extractTextUsingAdobePdfServices(file, pdfServices);
     } else if (
-      contentType ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      contentType === "application/msword"
+      file.contentType ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
-      extractedText = await extractTextFromDoc(fileBuffer);
+      extractedText = await extractTextFromDoc(file);
     } else {
-      extractedText = fileBuffer.toString("utf-8");
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ message: "Unsupported file type." }),
+      };
     }
 
     return {
@@ -95,32 +122,53 @@ export const handler = async (event) => {
     console.error("Error:", error);
     return {
       statusCode: 500,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-      },
-      body: JSON.stringify({ message: "File processing failed.", error }),
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({
+        message: "File processing failed.",
+        error: error.message,
+        stack: error.stack,
+      }),
     };
   }
 };
 
-// Helper function to convert a stream to a buffer
-const streamToBuffer = async (stream) => {
-  const chunks = [];
-  for await (const chunk of stream) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
+// Function to extract text from PDF using Adobe PDF Services SDK
+const extractTextUsingAdobePdfServices = async (file, pdfServices) => {
+  const tempFilePath = path.join("/tmp", "temp.pdf");
+
+  await fs.writeFile(tempFilePath, file.content);
+
+  const readStream = createReadStream(tempFilePath);
+  const inputAsset = await pdfServices.upload({
+    readStream,
+    mimeType: MimeType.PDF,
+  });
+
+  const params = new ExtractPDFParams({
+    elementsToExtract: [ExtractElementType.TEXT],
+  });
+
+  const job = new ExtractPDFJob({ inputAsset, params });
+  const pollingURL = await pdfServices.submit({ job });
+
+  const pdfServicesResponse = await pdfServices.getJobResult({
+    pollingURL,
+    resultType: ExtractPDFResult,
+  });
+
+  const extractedText = pdfServicesResponse.result.text;
+
+  return extractedText;
 };
 
-// Helper function to extract text from PDF using pdf-parse
-const extractTextFromPDF = async (fileBuffer) => {
-  const data = await pdfParse(fileBuffer);
-  console.log("data => ", JSON.stringify(data, null, 2));
-  return data.text;
-};
+// Function to extract text from DOCX files using Mammoth
+const extractTextFromDoc = async (file) => {
+  const tempFilePath = path.join("/tmp", "temp.docx");
 
-// Helper function to extract text from DOC/DOCX using Mammoth
-const extractTextFromDoc = async (fileBuffer) => {
-  const result = await mammoth.extractRawText({ buffer: fileBuffer });
-  return result.value;
+  await fs.writeFile(tempFilePath, file.content);
+
+  const result = await mammoth.extractRawText({ path: tempFilePath });
+  const extractedText = result.value;
+
+  return extractedText;
 };

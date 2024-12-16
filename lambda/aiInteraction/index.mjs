@@ -10,6 +10,31 @@ let openai;
 
 export const handler = async (event) => {
   try {
+    // Determine the HTTP method (REST or HTTP API)
+    const method =
+      event.httpMethod || // REST API (v1)
+      event.requestContext?.http?.method; // HTTP API (v2)
+    if (method === "OPTIONS") {
+      return {
+        statusCode: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+        body: null,
+      };
+    }
+
+    if (method !== "POST") {
+      return {
+        statusCode: 405,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+        },
+        body: JSON.stringify({ message: "Method Not Allowed." }),
+      };
+    }
     // Get the processed text from the event
     const processedText = JSON.parse(event.body).input;
 
@@ -60,7 +85,11 @@ export const handler = async (event) => {
         "Access-Control-Allow-Headers":
           "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token", // Allowed headers
       },
-      body: JSON.stringify({ message: "AI interaction failed.", error }),
+      body: JSON.stringify({
+        message: "AI interaction failed.",
+        error: error.message || "Unknown error", // Add a human-readable error message
+        stack: error.stack, // Optional: Include stack trace for debugging
+      }),
     };
   }
 };
