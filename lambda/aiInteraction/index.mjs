@@ -5,9 +5,6 @@ import {
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
 
-// Initialize OpenAI client without API key for now
-let openai;
-
 export const handler = async (event) => {
   try {
     // Determine the HTTP method (REST or HTTP API)
