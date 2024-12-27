@@ -127,7 +127,23 @@ export const handler = async (event) => {
       // Handle the error appropriately (e.g., set default values or throw an error)
     }
 
-    // Add the new user prompt to the history
+    // Generate a summarized version of the user prompt
+    const summaryCompletion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Generate a concise phrase (10 words or less) suitable for looking up similar user prompts. " +
+            "Focus on keywords and concepts rather than the user's specific situation or intent. " +
+            "For example, instead of 'New to ML, wants to understand and research user profiling,' generate something like 'Understanding ML for tutoring user profiling.'",
+        },
+        { role: "user", content: processedText },
+      ],
+    });
+
+    const promptSummary = summaryCompletion.choices[0].message.content;
+
     const timestamp = new Date().toISOString();
     const updatedHistory = [
       ...sessionHistoryList,
@@ -135,8 +151,9 @@ export const handler = async (event) => {
         message: processedText,
         sender: "user",
         timestamp,
-        score: score, // Attach the score to the user's prompt
-        feedback: feedback, // Attach the feedback to the user's prompt
+        score: score,
+        feedback: feedback,
+        promptSummary: promptSummary, // Add the summary to the history item
       },
     ];
 
@@ -186,14 +203,6 @@ export const handler = async (event) => {
     let confidence = null;
     let concerns = null;
 
-    console.log(
-      `confidenceEvaluation ==> ${JSON.stringify(
-        confidenceEvaluation,
-        null,
-        2
-      )}`
-    );
-
     try {
       const evaluation = JSON.parse(
         confidenceEvaluation.choices[0].message.content
@@ -210,8 +219,6 @@ export const handler = async (event) => {
       );
       // Handle the error appropriately
     }
-
-    console.log(`confidence ==> ${confidence}, concerns ==> ${concerns}`);
 
     // Update the history with the AI response (no need to add score/feedback again)
     const newHistory = [
