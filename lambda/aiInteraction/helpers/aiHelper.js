@@ -1,11 +1,11 @@
 // aiHelper.js
-import OpenAI from "openai";
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
+import OpenAI from "openai";
 
-let openai: OpenAI;
+let openai;
 
 async function getOpenAiApiKey() {
   console.log("Fetching OpenAI API key from Secrets Manager.");
@@ -17,11 +17,11 @@ async function getOpenAiApiKey() {
   });
   const secretResponse = await secretsManagerClient.send(secretValueCommand);
   const apiKey = JSON.parse(secretResponse.SecretString).OPENAI_API_KEY;
-  console.log("OpenAI API key fetched:", apiKey.slice(0, 5) + "..."); // Log the first 5 characters
+  console.log("OpenAI API key fetched:", apiKey.slice(0, 5) + "...");
   return apiKey;
 }
 
-async function getOpenAIClient(): Promise<OpenAI> {
+async function getOpenAIClient() {
   if (!openai) {
     const apiKey = await getOpenAiApiKey();
     openai = new OpenAI({ apiKey });
@@ -30,7 +30,7 @@ async function getOpenAIClient(): Promise<OpenAI> {
 }
 
 // Helper function for evaluating ai confidence
-export async function evaluateAIConfidence(aiGuidance: string, prompt: string) {
+export async function evaluateAIConfidence(aiGuidance, prompt) {
   const openai = await getOpenAIClient();
   console.log("Evaluating AI response confidence.");
   const confidenceEvaluation = await openai.chat.completions.create({

@@ -4,6 +4,7 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
+import { evaluateAIConfidence } from "./aiHelper.js";
 
 async function getGeminiApiKey() {
   console.log("Fetching Gemini API key from Secrets Manager.");
@@ -20,22 +21,60 @@ async function getGeminiApiKey() {
 }
 
 export async function generateGeminiResponse(history, prompt) {
-  const apiKey = await getGeminiApiKey();
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  console.log(
+    "Generating Gemini response with history:",
+    history,
+    "and prompt:",
+    prompt
+  );
+  try {
+    const apiKey = await getGeminiApiKey();
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-  // New formatted history
-  const formattedHistory = history.map((item) => ({
-    role: item.sender === "user" ? "user" : "model",
-    parts: [{ text: item.message }],
-  }));
+    const formattedHistory = history.map((item) => ({
+      role: item.sender === "user" ? "user" : "model",
+      parts: [{ text: item.message }],
+    }));
 
-  const chat = model.startChat({
-    history: formattedHistory,
-  });
+    console.log(" ");
+    console.log(" ");
+    console.log(" ");
+    console.log(
+      "==> Starting Gemini chat with the formatted history:",
+      JSON.stringify(formattedHistory, null, 2)
+    );
+    console.log(" ");
+    console.log(" ");
+    console.log(" ");
 
-  const result = await chat.sendMessage(prompt);
-  const response = await result.response;
-  const responseText = response.text();
-  return responseText;
+    const chat = model.startChat({
+      history: formattedHistory,
+    });
+
+    console.log("==> DONE");
+
+    const result = await chat.sendMessage(prompt);
+    const response = await result.response;
+    const responseText = response.text();
+    console.log("Gemini Response:", responseText);
+
+    // Get confidence from OpenAI
+    const { confidence, concerns } = await evaluateAIConfidence(
+      responseText,
+      prompt
+    );
+
+    return {
+      aiGuidance: responseText,
+      confidence,
+      concerns,
+    };
+  } catch (error) {
+    console.error("Error generating Gemini response:", error);
+    console.error("Error Details:", JSON.stringify(error, null, 2));
+    return {
+      message: "Gemini request failed with error: " + error.message,
+    };
+  }
 }

@@ -1,3 +1,4 @@
+// index.mjs
 import {
   DynamoDBClient,
   ScanCommand,
@@ -9,9 +10,13 @@ import { generateOpenAiResponse } from "./helpers/openaiHelper.js";
 
 export const handler = async (event) => {
   try {
+    console.log("Lambda handler started.");
+    console.log("Event:", JSON.stringify(event));
+
     const method = event.httpMethod || event.requestContext?.http?.method;
 
     if (method === "OPTIONS") {
+      console.log("Handling OPTIONS request.");
       return {
         statusCode: 200,
         headers: {
@@ -36,6 +41,7 @@ export const handler = async (event) => {
 
     // Parse request body
     const { input: processedText, sessionId } = JSON.parse(event.body);
+    console.log("Parsed body:", { processedText, sessionId });
 
     if (!sessionId) {
       console.log("Session ID missing.");
@@ -50,21 +56,26 @@ export const handler = async (event) => {
 
     // Initialize results object to store all ai responses and search results
     const aiResults = {
-      openai: {
-        aiGuidance: null,
+      prompt: {
         score: null,
         feedback: null,
+        promptSummary: null,
+      },
+      openai: {
+        aiGuidance: null,
         confidence: null,
         concerns: null,
-        promptSummary: null,
       },
       gemini: {
         aiGuidance: null,
+        confidence: null,
+        concerns: null,
       },
       search: {
         results: [],
       },
     };
+    console.log("Initialized aiResults:", aiResults);
 
     // Fetch session history from DynamoDB (same as before)
     const dynamoDbClient = new DynamoDBClient({ region: "us-west-2" });
@@ -76,8 +87,10 @@ export const handler = async (event) => {
       },
     });
 
+    console.log("Scanning DynamoDB for session with ID:", sessionId);
     const sessionResponse = await dynamoDbClient.send(scanCommand);
     const sessionItem = sessionResponse.Items?.[0];
+    console.log("DynamoDB session item:", sessionItem);
 
     if (!sessionItem) {
       console.log("Session not found.");
@@ -93,23 +106,38 @@ export const handler = async (event) => {
     const studentId = sessionItem.studentId?.S;
     const sessionHistoryString = sessionItem.history?.S || "[]";
     const sessionHistoryList = JSON.parse(sessionHistoryString);
+    console.log("Session history:", sessionHistoryList);
     const timestamp = new Date().toISOString();
 
     // --- Gemini Response ---
-    aiResults.gemini.aiGuidance = await generateGeminiResponse(
+    console.log("Generating Gemini response.");
+    const geminiResponse = await generateGeminiResponse(
       sessionHistoryList,
       processedText
     );
+    aiResults.gemini.aiGuidance = geminiResponse.aiGuidance;
+    aiResults.gemini.confidence = geminiResponse.confidence;
+    aiResults.gemini.concerns = geminiResponse.concerns;
+    console.log("Gemini response:", aiResults.gemini);
 
     // --- OpenAI Response ---
+    console.log("Generating OpenAI response.");
     const openAiResponse = await generateOpenAiResponse(
       sessionHistoryList,
       processedText
     );
-    aiResults.openai = openAiResponse;
+    aiResults.openai.aiGuidance = openAiResponse.aiGuidance;
+    aiResults.openai.confidence = openAiResponse.confidence;
+    aiResults.openai.concerns = openAiResponse.concerns;
+    aiResults.prompt.score = openAiResponse.score;
+    aiResults.prompt.feedback = openAiResponse.feedback;
+    aiResults.prompt.promptSummary = openAiResponse.promptSummary;
+    console.log("OpenAI response:", aiResults.openai);
 
     // --- Google Search Results ---
+    console.log("Fetching Google Search results.");
     aiResults.search.results = await googleSearch(processedText);
+    console.log("Google Search results:", aiResults.search.results);
 
     // Update history
     const newHistory = [
@@ -118,9 +146,9 @@ export const handler = async (event) => {
         message: processedText,
         sender: "user",
         timestamp,
-        score: aiResults.openai.score,
-        feedback: aiResults.openai.feedback,
-        promptSummary: aiResults.openai.promptSummary,
+        score: aiResults.prompt.score,
+        feedback: aiResults.prompt.feedback,
+        promptSummary: aiResults.prompt.promptSummary,
       },
       {
         message: aiResults.openai.aiGuidance,
@@ -132,9 +160,12 @@ export const handler = async (event) => {
       {
         message: aiResults.gemini.aiGuidance,
         sender: "gemini",
+        confidence: aiResults.gemini.confidence,
+        concerns: aiResults.gemini.concerns,
         timestamp: new Date().toISOString(),
       },
     ];
+    console.log("New history:", newHistory);
 
     // Update session history in DynamoDB
     const updateSessionCommand = new UpdateItemCommand({
@@ -149,8 +180,11 @@ export const handler = async (event) => {
       },
     });
 
+    console.log("Updating DynamoDB session history.");
     await dynamoDbClient.send(updateSessionCommand);
+    console.log("DynamoDB session history updated.");
 
+    console.log("Lambda execution successful.");
     return {
       statusCode: 200,
       headers: {
