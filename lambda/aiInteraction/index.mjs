@@ -136,8 +136,21 @@ export const handler = async (event) => {
 
     // --- Google Search Results ---
     console.log("Fetching Google Search results.");
-    aiResults.search.results = await googleSearch(processedText);
-    console.log("Google Search results:", aiResults.search.results);
+    const googleSearchResults = await googleSearch(processedText);
+    console.log("Raw Google Search results:", googleSearchResults);
+
+    // Process and simplify search results
+    const simplifiedSearchResults = googleSearchResults
+      .slice(0, 3) // Take the top 3 results for brevity
+      .map(
+        (result, index) =>
+          `Result ${index + 1}: ${result.title} - ${result.link}`
+      )
+      .join("\n");
+
+    aiResults.search.results = simplifiedSearchResults; // Store summary for response
+
+    console.log("Simplified Google Search results:", simplifiedSearchResults);
 
     // Update history
     const newHistory = [
@@ -162,6 +175,11 @@ export const handler = async (event) => {
         sender: "gemini",
         confidence: aiResults.gemini.confidence,
         concerns: aiResults.gemini.concerns,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        message: simplifiedSearchResults,
+        sender: "googleSearch",
         timestamp: new Date().toISOString(),
       },
     ];
@@ -195,7 +213,6 @@ export const handler = async (event) => {
       },
       body: JSON.stringify({
         message: "AI guidance and search results generated successfully!",
-        aiResults,
         updatedHistory: newHistory,
       }),
     };
