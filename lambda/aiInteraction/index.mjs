@@ -139,18 +139,23 @@ export const handler = async (event) => {
     const googleSearchResults = await googleSearch(processedText);
     console.log("Raw Google Search results:", googleSearchResults);
 
-    // Process and simplify search results
-    const simplifiedSearchResults = googleSearchResults
-      .slice(0, 3) // Take the top 3 results for brevity
-      .map(
-        (result, index) =>
-          `Result ${index + 1}: ${result.title} - ${result.link}`
-      )
-      .join("\n");
+    // Process and format search results into a string
+    const formattedSearchResults = googleSearchResults
+      .slice(0, 3)
+      .map((result, index) => {
+        const sourceMatch = result.link.match(/\/\/(www\.)?([\w\-]+)\./);
+        const source = sourceMatch ? sourceMatch[2] : "Unknown source";
 
-    aiResults.search.results = simplifiedSearchResults; // Store summary for response
+        return `Result ${index + 1}:
+    Title: ${result.title || "No title available"}
+    Link: ${result.link}
+    Description: ${result.snippet || "No description available"}
+    Source: ${source}`;
+      })
+      .join("\n\n");
 
-    console.log("Simplified Google Search results:", simplifiedSearchResults);
+    aiResults.search.results = formattedSearchResults; // Store formatted results for response
+    console.log("Formatted Google Search results:", formattedSearchResults);
 
     // Update history
     const newHistory = [
@@ -178,7 +183,7 @@ export const handler = async (event) => {
         timestamp: new Date().toISOString(),
       },
       {
-        message: simplifiedSearchResults,
+        message: aiResults.search.results,
         sender: "googleSearch",
         timestamp: new Date().toISOString(),
       },
