@@ -190,6 +190,8 @@ export const handler = async (event) => {
     ];
     console.log("New history:", newHistory);
 
+    const now = new Date().toISOString();
+
     // Update session history in DynamoDB
     const updateSessionCommand = new UpdateItemCommand({
       TableName: process.env.TUTORING_SESSIONS_TABLE,
@@ -197,9 +199,10 @@ export const handler = async (event) => {
         sessionId: { S: sessionId },
         studentId: { S: studentId },
       },
-      UpdateExpression: "SET history = :history",
+      UpdateExpression: "SET history = :history, modifiedAt = :modifiedAt",
       ExpressionAttributeValues: {
         ":history": { S: JSON.stringify(newHistory) },
+        ":modifiedAt": { S: now }, // Add the modifiedAt field
       },
     });
 
